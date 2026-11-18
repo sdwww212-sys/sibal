@@ -1,0 +1,9 @@
+<!doctype html>
+<meta charset="utf-8"><title>이동 중</title>
+<script>
+// 홈 화면 앱으로 처음 열었거나 새로고침으로 서비스워커를 건너뛴 경우 -> 로그인 화면으로
+const seg = location.pathname.split("/")[1];
+const base = location.hostname.endsWith("github.io") && seg ? "/" + seg + "/" : "/";
+const rest = location.pathname.startsWith(base + "app/") ? decodeURIComponent(location.pathname.slice(base.length + 4)) : "";
+location.replace(base + (rest ? "?next=" + encodeURIComponent(rest) : ""));
+</script>

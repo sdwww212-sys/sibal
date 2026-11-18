@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="robots" content="noindex,nofollow">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="국시">
+<title>방사선사 국시</title>
+<style>
+:root{--bg:#f4f6fa;--card:#fff;--ink:#1d2433;--sub:#667085;--line:#d8dde6;--acc:#2f6fed;--err:#d92d20}
+@media (prefers-color-scheme:dark){:root{--bg:#12151c;--card:#1b2029;--ink:#e8ecf3;--sub:#98a2b3;--line:#323946;--acc:#5b8dff;--err:#ff6b5e}}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;display:flex;align-items:center;justify-content:center;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo","Malgun Gothic",sans-serif;padding:16px}
+form{width:100%;max-width:360px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:28px 24px}
+h1{font-size:20px;margin:0 0 4px}
+p{margin:0 0 20px;color:var(--sub);font-size:14px}
+label{display:block;font-size:14px;margin:12px 0 6px;color:var(--sub)}
+input{width:100%;font:inherit;padding:11px 12px;border:1px solid var(--line);border-radius:9px;background:transparent;color:var(--ink)}
+input:focus{outline:2px solid var(--acc);border-color:transparent}
+button{width:100%;margin-top:20px;font:inherit;font-weight:600;padding:12px;border:0;border-radius:9px;background:var(--acc);color:#fff;cursor:pointer}
+button:disabled{opacity:.6}
+#msg{min-height:22px;margin-top:12px;font-size:14px;color:var(--err)}
+#msg.ok{color:var(--sub)}
+</style>
+</head>
+<body>
+<form id="f" autocomplete="on">
+  <h1>방사선사 국시</h1>
+  <p>받은 이름과 비밀번호를 넣어 주세요.</p>
+  <label for="n">이름</label>
+  <input id="n" name="username" autocomplete="username" required>
+  <label for="p">비밀번호</label>
+  <input id="p" name="password" type="password" autocomplete="current-password" required>
+  <button id="b">들어가기</button>
+  <div id="msg"></div>
+</form>
+<script>
+const $ = id => document.getElementById(id);
+const msg = (t, ok) => { $("msg").textContent = t; $("msg").className = ok ? "ok" : ""; };
+const qs = new URLSearchParams(location.search);
+const next = qs.get("next") || "index.html";
+const goApp = () => location.replace("app/" + next.split("/").map(encodeURIComponent).join("/"));
+const b64 = s => Uint8Array.from(atob(s), c => c.charCodeAt(0));
+const hex = buf => [...new Uint8Array(buf)].map(x => x.toString(16).padStart(2, "0")).join("");
+
+function idb() {
+  return new Promise((ok, no) => { const r = indexedDB.open("kuksi", 1); r.onupgradeneeded = () => r.result.createObjectStore("k"); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); });
+}
+async function idbDo(mode, fn) {
+  const db = await idb();
+  return new Promise((ok, no) => { const t = db.transaction("k", mode); const q = fn(t.objectStore("k")); t.oncomplete = () => ok(q && q.result); t.onerror = () => no(t.error); });
+}
+async function swReady() {
+  if (!("serviceWorker" in navigator) || !window.isSecureContext) throw new Error("이 브라우저에서는 열 수 없어요 (사파리·크롬 최신 버전으로 열어 주세요)");
+  await navigator.serviceWorker.register("sw.js", { scope: "./" });
+  const reg = await navigator.serviceWorker.ready;
+  reg.active && reg.active.postMessage("reset");
+}
+
+(async () => {
+  try {
+    if (qs.has("logout")) { await idbDo("readwrite", s => s.delete("k")); await swReady(); msg("로그아웃했어요.", 1); return; }
+    if (await idbDo("readonly", s => s.get("k"))) { msg("여는 중…", 1); await swReady(); goApp(); }
+  } catch (e) { msg(e.message); }
+})();
+
+$("f").onsubmit = async ev => {
+  ev.preventDefault();
+  $("b").disabled = true; msg("확인 중…", 1);
+  try {
+    const name = $("n").value.trim().normalize("NFC"), pw = $("p").value;
+    const K = await (await fetch("keys.json", { cache: "no-store" })).json();
+    const uid = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("u:" + name))).slice(0, 32);
+    const u = K.u[uid];
+    let raw = null;
+    if (u) {
+      const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(pw), "PBKDF2", false, ["deriveKey"]);
+      const wk = await crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: b64(u.s), iterations: K.it }, base, { name: "AES-GCM", length: 256 }, false, ["decrypt"]);
+      try { raw = await crypto.subtle.decrypt({ name: "AES-GCM", iv: b64(u.i), additionalData: new TextEncoder().encode("keys") }, wk, b64(u.w)); } catch (e) {}
+    }
+    if (!raw) { msg("이름 또는 비밀번호가 맞지 않아요."); $("b").disabled = false; return; }
+    await idbDo("readwrite", s => s.put(raw, "k"));
+    // 기록 동기화용 이름·확인값 (비밀번호에서 만든 값이라 다른 사람이 흉내 못 냄)
+    const tok = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("sync|" + name + "|" + pw + "|" + u.s)));
+    let prev = null; try { prev = JSON.parse(localStorage.getItem("kuksi_user")); } catch (e) {}
+    if (prev && prev.name !== name) {  // 다른 사람이 이 기기로 로그인 -> 앞 사람 기록은 서버에 있으니 기기에서만 비움
+      for (const k of Object.keys(localStorage)) if (k === "wrongnote" || k.startsWith("omr:") || k === "kuksi_t") localStorage.removeItem(k);
+    }
+    localStorage.setItem("kuksi_user", JSON.stringify({ name, tok }));
+    msg("여는 중…", 1);
+    await swReady();
+    goApp();
+  } catch (e) { msg(e.message || String(e)); $("b").disabled = false; }
+};
+</script>
+</body>
+</html>

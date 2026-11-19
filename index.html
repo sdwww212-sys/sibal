@@ -60,7 +60,7 @@ async function swReady() {
 
 (async () => {
   try {
-    if (qs.has("logout")) { await idbDo("readwrite", s => s.delete("k")); await swReady(); msg("로그아웃했어요.", 1); return; }
+    if (qs.has("logout")) { await idbDo("readwrite", s => s.delete("k")); await swReady(); msg(qs.has("relogin") ? "업데이트로 한 번만 다시 로그인해 주세요." : "로그아웃했어요.", 1); return; }
     if (await idbDo("readonly", s => s.get("k"))) { msg("여는 중…", 1); await swReady(); goApp(); }
   } catch (e) { msg(e.message); }
 })();
@@ -82,12 +82,12 @@ $("f").onsubmit = async ev => {
     if (!raw) { msg("이름 또는 비밀번호가 맞지 않아요."); $("b").disabled = false; return; }
     await idbDo("readwrite", s => s.put(raw, "k"));
     // 기록 동기화용 이름·확인값 (비밀번호에서 만든 값이라 다른 사람이 흉내 못 냄)
-    const tok = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("sync|" + name + "|" + pw + "|" + u.s)));
+    const tok = hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode("sync2|" + name + "|" + pw)));  // 사이트를 다시 만들어도 바뀌지 않게 솔트는 안 씀
     let prev = null; try { prev = JSON.parse(localStorage.getItem("kuksi_user")); } catch (e) {}
     if (prev && prev.name !== name) {  // 다른 사람이 이 기기로 로그인 -> 앞 사람 기록은 서버에 있으니 기기에서만 비움
       for (const k of Object.keys(localStorage)) if (k === "wrongnote" || k.startsWith("omr:") || k === "kuksi_t") localStorage.removeItem(k);
     }
-    localStorage.setItem("kuksi_user", JSON.stringify({ name, tok }));
+    localStorage.setItem("kuksi_user", JSON.stringify({ name, tok, v: 2 }));
     msg("여는 중…", 1);
     await swReady();
     goApp();
